@@ -87,8 +87,6 @@ void Encode_block (int16_t block[64], int16_t* previous_dc, void* dc_huffman_tab
     Write_Huffman_bits(dc_size_value.size, dc_size_value.value, dc_huffman_table);
     // Encode AC coefficients using ac_huffman_table, run-length encoding, and zigzag order
     int8_t run_length = 0;
-    uint32_t bit_buffer = 0;
-    uint8_t bit_count = 0;
     for (int8_t i = 1; i < 64; i++){
         if (block[i] == 0){
             run_length++;
@@ -110,6 +108,35 @@ void Encode_block (int16_t block[64], int16_t* previous_dc, void* dc_huffman_tab
         Write_Huffman_bits(0x00, 0, ac_huffman_table); // EOB symbol
     }
 }
+void Encode_block_8x8_output(int16_t block[64], int16_t* previous_dc, void* dc_huffman_table, void* ac_huffman_table){
+    int16_t current_dc = block[0];
+    size_value dc_size_value = encode_dc_dpcm(current_dc, *previous_dc);
+    *previous_dc = current_dc; // Update previous DC for the next block
+    // Encode DC coefficient using dc_huffman_table and dc_size_value
+    Print_Huffman_bits(dc_size_value.size, dc_size_value.value, dc_huffman_table);
+    // Encode AC coefficients using ac_huffman_table, run-length encoding, and zigzag order
+    int8_t run_length = 0;
+    for (int8_t i = 1; i < 64; i++){
+        if (block[i] == 0){
+            run_length++;
+        } else {
+            while (run_length > 15){
+                // Encode a run of 16 zeros
+                 // Size 0 with run length 15
+                Print_Huffman_bits(0xF0, 0, ac_huffman_table);
+                run_length -= 16;
+            }
+            size_value ac_size_value = get_size_value(block[i]);
+            ac_size_value.size |= (run_length << 4); // Combine run length and size
+            Print_Huffman_bits(ac_size_value.size, ac_size_value.value, ac_huffman_table);
+            run_length = 0; // Reset run length after encoding a non-zero coefficient
+        }
+    }
+    if (run_length > 0){
+        // Encode end of block (EOB) if there are remaining zeros
+        Print_Huffman_bits(0x00, 0, ac_huffman_table); // EOB symbol
+    }
+}
 uint32_t bit_buffer = 0;
 uint8_t bit_count = 0;
 void Put_bits(uint32_t bits, uint8_t length){
@@ -128,6 +155,24 @@ void Put_bits(uint32_t bits, uint8_t length){
         if (byte_to_write == 0xFF){
             // If the byte is 0xFF, we need to write a zero byte after it to prevent marker confusion
             Write_Physical_Bytes(0x00);
+        }
+        bit_count -= 8; // Remove the written bits from the buffer
+    }
+}
+void Print_bits(uint32_t bits, uint8_t length){
+    // This function will print the specified number of bits to the output.
+    if (length == 0){
+        return; // No bits to write
+    }
+    bit_buffer = (bit_buffer << length) | (bits & ((1 << length) - 1)); // Add new bits to buffer
+    bit_count += length; // Update bit count
+
+    while (bit_count >= 8){
+        uint8_t byte_to_write = (bit_buffer >> (bit_count - 8)) & 0xFF; // Get the top 8 bits to write
+        Print_Physical_Bytes(byte_to_write);
+        if (byte_to_write == 0xFF){
+            // If the byte is 0xFF, we need to write a zero byte after it to prevent marker confusion
+            Print_Physical_Bytes(0x00);
         }
         bit_count -= 8; // Remove the written bits from the buffer
     }
@@ -156,6 +201,21 @@ void Write_Huffman_bits(uint8_t symbol_byte, uint16_t value_bits, void* huffman_
     uint8_t value_size = symbol_byte & 0x0F; // Size is in the lower 4 bits of symbol_byte
     if (value_size > 0){
         Put_bits(value_bits, value_size); // Write the value bits (size is in the lower 4 bits of symbol_byte)
+    }
+}
+void Print_Huffman_bits(uint8_t symbol_byte, uint16_t value_bits, void* huffman_table){
+    // This function will print the Huffman bits for the given size and value using the provided Huffman table.
+    // It will look up the Huffman code for the size and then print the bits for the value.
+    // ...
+    huffman_code* table = (huffman_code*)huffman_table;
+    int16_t huff_code = table[symbol_byte].code;
+    uint8_t huff_length = table[symbol_byte].length;
+
+
+    Print_bits(huff_code, huff_length); // Write the Huffman code
+    uint8_t value_size = symbol_byte & 0x0F; // Size is in the lower 4 bits of symbol_byte
+    if (value_size > 0){
+        Print_bits(value_bits, value_size); // Write the value bits (size is in the lower 4 bits of symbol_byte)
     }
 }
 void generate_huffman_table(const uint8_t *bits, const uint8_t *vals, huffman_code *table) {
@@ -207,6 +267,9 @@ void init_jpeg_encoding(){
     generate_huffman_table(STD_DC_CHROMA_BITS, STD_DC_CHROMA_VALS, HT_DC_CHROMA);
     generate_huffman_table(STD_AC_CHROMA_BITS, STD_AC_CHROMA_VALS, HT_AC_CHROMA);
     
+}
+void Print_Physical_Bytes(uint8_t byte){
+    printf("%02X ", byte);
 }
 void Write_Physical_Bytes(uint8_t byte){
     // This function will write a single byte to the output (e.g., file or memory buffer).
