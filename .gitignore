@@ -1,3 +1,6 @@
-*.o
+bitmaps.o
+Encoding.o
+JPEG_Encode.o
+
 gmon.out
 
