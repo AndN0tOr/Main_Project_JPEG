@@ -1,1 +1,5 @@
-secret_config.json
+*.o
+gmon.out
+program
+program.exe
+
